@@ -60,7 +60,7 @@ One persistent `adb shell` is polled every 0.5 s:
 
 - Polling costs a little CPU on the phone (a few dumpsys calls per second). For the most accurate thermal readings, unplug from charging, since charging heats the battery and changes throttling.
 - Some phones block parts of sysfs from the `shell` user, so GPU or per-core load can show `--`. That's the phone's permissions, not a bug.
-- Tested against a MediaTek Dimensity / HyperOS phone. Other vendors may expose different sensor names.
+- Built around a MediaTek Dimensity / HyperOS phone. Other vendors may expose different sensor names.
 
 ## License
 

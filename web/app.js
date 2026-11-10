@@ -164,10 +164,12 @@ function renderCpu(d) {
 
 function stat(label, val, c = "") { return `<div class="temp"><span>${label}</span><b class="${c}">${val}</b></div>`; }
 function renderMisc() {
-  const g = last.gpu || {}, b = last.battery || {}, m = last.mem;
+  const g = last.gpu || {}, b = last.battery || {}, m = last.mem, cool = last.cooling || {};
   const chg = /charg/i.test(b.status || "") && !/dis/i.test(b.status || "");
   $("misc").innerHTML =
-    stat("GPU clock", fmt(g.mhz, 0, " MHz")) + stat("GPU load", fmt(g.load, 0, "%")) +
+    (g.mhz !== undefined || cool.gpu === null || cool.gpu === undefined ? stat("GPU clock", fmt(g.mhz, 0, " MHz")) + stat("GPU load", fmt(g.load, 0, "%")) : "") +
+    (cool.gpu !== null && cool.gpu !== undefined ? stat("GPU throttle level", cool.gpu, cool.gpu > 0 ? "warn" : "good") : "") +
+    (cool.cpu !== null && cool.cpu !== undefined ? stat("CPU throttle level", cool.cpu, cool.cpu > 0 ? "warn" : "good") : "") +
     stat("Battery", fmt(b.level, 0, "%")) + stat("Status", esc(b.status || "--"), chg ? "warn" : "") +
     stat("Current", fmt(b.ma, 0, " mA")) + stat("Power", fmt(b.w, 2, " W")) +
     stat("Voltage", fmt(b.v, 2, " V")) + stat("Batt temp", fmt(b.temp, 1, "°"), b.temp >= 42 ? "bad" : b.temp >= 38 ? "warn" : "") +
@@ -209,7 +211,21 @@ async function post(url, body) {
 }
 $("deviceSel").onchange = (e) => start(e.target.value);
 $("refreshBtn").onclick = () => loadDevices();
-$("connBtn").onclick = () => $("connPanel").classList.toggle("hidden");
+$("connBtn").onclick = () => { $("connPanel").classList.toggle("hidden"); scanMdns(); };
+async function scanMdns() {
+  const box = $("mdns"); box.textContent = "Searching the network for phones with Wireless debugging on…";
+  let r; try { r = await (await fetch("/api/mdns")).json(); } catch { box.textContent = ""; return; }
+  const s = r.services || [];
+  if (!s.length) { box.textContent = "No phone found automatically. Open Developer options → Wireless debugging on the phone, or type the IP & port below."; return; }
+  box.innerHTML = s.map((x) => `<div class="row" style="align-items:center;margin-bottom:6px"><span>📶 ${esc(x.name)}</span>` +
+    (x.connect ? `<button data-c="${esc(x.connect)}">Connect ${esc(x.connect)}</button>` : "") +
+    (x.pairing ? `<span class="sub">pairing port ${esc(x.pairing)}</span>` : "") + "</div>").join("");
+  box.querySelectorAll("button[data-c]").forEach((b) => b.onclick = async () => {
+    const r = await post("/api/connect", { address: b.dataset.c });
+    if (r.ok) loadDevices(false);
+    else { $("pairAddr").value = (s.find((x) => x.connect === b.dataset.c) || {}).pairing || ""; }
+  });
+}
 $("resetBtn").onclick = () => { if (serial) post("/api/reset", { serial }); resetCharts(); };
 $("wifiBtn").onclick = async () => { if (!serial) return; const r = await post("/api/wifi", { serial }); if (r.ok) setTimeout(() => loadDevices(false), 800); };
 $("connectBtn").onclick = async () => { const r = await post("/api/connect", { address: $("connAddr").value }); if (r.ok) loadDevices(false); };

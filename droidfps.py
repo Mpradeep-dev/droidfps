@@ -246,10 +246,12 @@ class Sampler(threading.Thread):
             if self.thermal_zones:
                 parts.append(("zones", "for z in /sys/class/thermal/thermal_zone*; do echo \"$(cat $z/type 2>/dev/null)|$(cat $z/temp 2>/dev/null)\"; done"))
             else:
-                parts.append(("thermal", "dumpsys thermalservice | sed -n '/Thermal Status/p;/Current temperatures from HAL/,/Current cooling devices/p'"))
+                parts.append(("thermal", "dumpsys thermalservice | sed -n '/Thermal Status/p;/Current temperatures from HAL/,$p'"))
             parts.append(("cpu", "for c in /sys/devices/system/cpu/cpu[0-9]*; do echo ${c##*/} $(cat $c/cpufreq/scaling_cur_freq 2>/dev/null) $(cat $c/online 2>/dev/null); done"))
             parts.append(("stat", "grep '^cpu' /proc/stat 2>/dev/null"))
-            parts.append(("bat", "for f in capacity status current_now voltage_now temp; do echo $f=$(cat /sys/class/power_supply/battery/$f 2>/dev/null); done"))
+            parts.append(("bat", "dumpsys battery | grep -E '^ +(level|status|voltage|temperature|AC powered|USB powered|Wireless powered):';"
+                          " for f in /sys/class/power_supply/battery/current_now /sys/class/power_supply/*/current_now; do"
+                          " v=$(cat $f 2>/dev/null) && [ -n \"$v\" ] && echo \"current_now: $v\" && break; done"))
             if self.gpu_paths:
                 parts.append(("gpu", "for f in %s; do echo \"$f|$(head -c 120 $f 2>/dev/null | tr '\\n' ' ')\"; done" % " ".join(self.gpu_paths)))
         if tick % 4 == 0:
@@ -396,8 +398,12 @@ class Sampler(threading.Thread):
     # parsers --------------------------------------------------------------
     @staticmethod
     def parse_thermal(lines):
-        temps, status = {}, None
+        temps, status, cool = {}, None, {}
         for l in lines:
+            m = re.search(r"CoolingDevice\{mValue=(\d+), mType=(\d+), mName=([^}]+)\}", l)
+            if m:
+                cool[m.group(3)] = int(m.group(1))
+                continue
             m = re.search(r"Thermal Status:\s*(\d)", l)
             if m:
                 status = int(m.group(1))
@@ -405,7 +411,11 @@ class Sampler(threading.Thread):
             if m:
                 temps[m.group(3)] = {"name": m.group(3), "value": round(float(m.group(1)), 1),
                                      "type": int(m.group(2)), "status": int(m.group(4))}
-        return {"temps": list(temps.values()), "thermal_status": status}
+        gpu = next((v for k, v in cool.items() if re.search(r"mali|gpu|kgsl", k, re.I)), None)
+        cpu = {k: v for k, v in cool.items() if re.search(r"cpu", k, re.I)}
+        out = {"temps": list(temps.values()), "thermal_status": status,
+               "cooling": {"gpu": gpu, "cpu": max(cpu.values()) if cpu else None}}
+        return out
 
     @staticmethod
     def parse_zones(lines):
@@ -450,12 +460,16 @@ class Sampler(threading.Thread):
 
     @staticmethod
     def parse_battery(lines):
-        b = dict(l.split("=", 1) for l in lines if "=" in l)
-        cur, volt = first_int(b.get("current_now")), first_int(b.get("voltage_now"))
+        b = {k.strip(): v.strip() for k, v in (l.split(":", 1) for l in lines if ":" in l)}
+        cur, volt = first_int(b.get("current_now")), first_int(b.get("voltage"))
         ma = None if cur is None else (cur / 1000 if abs(cur) > 20000 else cur)
         v = None if volt is None else (volt / 1e6 if volt > 100000 else volt / 1000)
-        t = first_int(b.get("temp"))
-        return {"level": first_int(b.get("capacity")), "status": b.get("status") or None,
+        t = first_int(b.get("temperature"))
+        st = {"1": "Unknown", "2": "Charging", "3": "Discharging", "4": "Not charging", "5": "Full"}.get(b.get("status"), b.get("status"))
+        plugged = any(b.get(k) == "true" for k in ("AC powered", "USB powered", "Wireless powered"))
+        if st == "Not charging" and not plugged:
+            st = "Discharging"
+        return {"level": first_int(b.get("level")), "status": st or None, "plugged": plugged,
                 "ma": r(ma, 0), "v": r(v, 3), "w": r(abs(ma) / 1000 * v, 2) if ma is not None and v else None,
                 "temp": r(t / 10) if t is not None else None}
 
@@ -520,6 +534,18 @@ MANAGER = Manager()
 
 # --------------------------------------------------------------------------- wifi helpers
 
+def mdns_services():
+    """Phones advertising Wireless debugging on this network (connect and pairing ports)."""
+    _, out = adb("mdns", "services", timeout=8)
+    found = {}
+    for l in out.splitlines():
+        m = re.match(r"(\S+)\s+_adb-tls-(connect|pairing)\._tcp\.?\s+([\d.]+:\d+)", l)
+        if m:
+            name = re.sub(r"^adb-|-\w+$", "", m.group(1))
+            found.setdefault(name, {"name": name})[m.group(2)] = m.group(3)
+    return {"services": list(found.values())}
+
+
 def device_ip(serial):
     _, out = adb("-s", serial, "shell", "ip -f inet addr show wlan0")
     m = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", out)
@@ -565,6 +591,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.static("style.css", "text/css; charset=utf-8")
         if u.path == "/api/devices":
             return self.send_json(list_devices())
+        if u.path == "/api/mdns":
+            return self.send_json(mdns_services())
         if u.path == "/api/stream":
             return self.stream(parse_qs(u.query).get("serial", [""])[0])
         self.send_error(404)
@@ -622,12 +650,18 @@ class Handler(BaseHTTPRequestHandler):
             if ":" not in addr:
                 addr += ":5555"
             code, out = adb("connect", addr)
+            if "protocol fault" in out or "failed to authenticate" in out:
+                out += ("\nThat port didn't accept a connection. Use the IP & port on the main Wireless debugging"
+                        " screen (not the pairing pop-up), and pair first if this PC hasn't been paired.")
             return self.send_json({"ok": code == 0 and "connected" in out and "fail" not in out.lower(), "msg": out})
         if path == "/api/pair":
             pin = str(body.get("code", "")).strip()
             if not pin.isdigit():
                 return self.send_json({"ok": False, "msg": "pairing code must be digits"}, 400)
             code, out = adb("pair", addr, pin)
+            if "protocol fault" in out:
+                out += ("\nThat isn't the pairing port. Tap 'Pair device with pairing code' and use the IP & port"
+                        " shown in that pop-up (it changes each time).")
             return self.send_json({"ok": code == 0 and "Successfully" in out, "msg": out})
         if path == "/api/disconnect":
             code, out = adb("disconnect", addr or serial)

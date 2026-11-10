@@ -9,7 +9,7 @@ Live performance monitor for Android phones over ADB. It shows a real-time web d
 - **Frame-time graph** (every frame, in ms), worst frame and stutter count
 - **Temperatures**: CPU, GPU, SoC, skin, battery and every other sensor the thermal HAL exposes, plus Android's throttle status
 - **CPU** clock and load per core
-- **GPU** clock and load, where the phone allows reading them (MediaTek GED, Adreno kgsl, Mali devfreq)
+- **GPU** clock and load where the phone allows reading them; otherwise the GPU/CPU throttle (cooling) level from the thermal service
 - **Battery** level, charge state, current (mA), voltage and power (W)
 - **RAM** and the top processes by CPU
 - **Record to CSV** for comparing sessions later
@@ -34,7 +34,7 @@ Options: `--port 9000`, `--no-browser`, `--host 0.0.0.0` (to open the dashboard 
 
 ## Wi-Fi
 
-Open **Wi-Fi / connect** in the dashboard:
+Open **Wi-Fi / connect** in the dashboard. Phones with Wireless debugging on are found automatically (mDNS) with a one-click Connect button. Or:
 
 1. **USB → Wi-Fi**: with the cable plugged in, switch adb to Wi-Fi (port 5555), then unplug.
 2. **Connect by IP**: enter `phone-ip:port`.
@@ -52,7 +52,7 @@ One persistent `adb shell` is polled every 0.5 s:
 | Temps / throttling | `dumpsys thermalservice` (falls back to `/sys/class/thermal`) |
 | CPU | `/sys/devices/system/cpu/*/cpufreq`, `/proc/stat`, `top` |
 | GPU | vendor sysfs nodes, when readable |
-| Battery | `/sys/class/power_supply/battery` |
+| Battery | `dumpsys battery` + the first readable `power_supply/*/current_now` |
 
 **1% low** = the average FPS of the slowest 1% of frames, the same definition as PC tools like CapFrameX. 0.1% low is the same for the slowest 0.1%.
 

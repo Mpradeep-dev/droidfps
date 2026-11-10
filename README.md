@@ -56,6 +56,10 @@ One persistent `adb shell` is polled every 0.5 s:
 
 **1% low** = the average FPS of the slowest 1% of frames, the same definition as PC tools like CapFrameX. 0.1% low is the same for the slowest 0.1%.
 
+## Light mode
+
+Press **Light mode** in the header (it's remembered) to go easier on the phone while gaming. It turns off the process list (`top`, the heaviest poll), reads temperatures, CPU and battery every ~3 s instead of every 1 s, and samples frames every 0.8 s. FPS, frame times and 1% / 0.1% lows stay exact, because every frame timestamp is still collected. Closing the dashboard tab stops all polling after about 10 s.
+
 ## Notes
 
 - Polling costs a little CPU on the phone (a few dumpsys calls per second). For the most accurate thermal readings, unplug from charging, since charging heats the battery and changes throttling.

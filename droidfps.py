@@ -27,6 +27,7 @@ WEB = os.path.join(ROOT, "web")
 ADB = os.environ.get("ADB", "adb")
 ADDR_RE = re.compile(r"^[A-Za-z0-9._\-:\[\]]{1,120}$")
 INTERVAL = 0.5  # seconds between samples; SurfaceFlinger keeps only ~128 frames
+LIGHT_INTERVAL = 0.8  # still under the ~1 s that 128 frames last at 120 Hz
 
 GPU_CANDIDATES = [
     "/sys/kernel/ged/hal/current_freq",
@@ -154,6 +155,7 @@ class Sampler(threading.Thread):
         self.layer, self.candidates, self.evaluate = None, [], False
         self.gpu_paths, self.cpu_max, self.device = [], {}, {}
         self.prev_stat = None
+        self.light = False  # light mode: no process list, fewer and slower polls
         self.thermal_zones = False
         self.last_frame_host = 0.0
 
@@ -200,7 +202,7 @@ class Sampler(threading.Thread):
                     idle = not self.subs and time.time() - self.idle_since > 10
                 if idle:
                     break
-                time.sleep(max(0.05, INTERVAL - (time.time() - t0)))
+                time.sleep(max(0.05, (LIGHT_INTERVAL if self.light else INTERVAL) - (time.time() - t0)))
         except EOFError as e:
             self.broadcast({"error": str(e)})
         except Exception as e:  # keep the server alive whatever the phone returns
@@ -241,7 +243,8 @@ class Sampler(threading.Thread):
                 parts.append(("lat%d" % i, "dumpsys SurfaceFlinger --latency %s" % shlex.quote(l)))
         elif self.layer:
             parts.append(("lat", "dumpsys SurfaceFlinger --latency %s" % shlex.quote(self.layer)))
-        slow = tick % 2 == 0
+        L = self.light
+        slow = tick % (4 if L else 2) == 0
         if slow:
             if self.thermal_zones:
                 parts.append(("zones", "for z in /sys/class/thermal/thermal_zone*; do echo \"$(cat $z/type 2>/dev/null)|$(cat $z/temp 2>/dev/null)\"; done"))
@@ -254,17 +257,18 @@ class Sampler(threading.Thread):
                           " v=$(cat $f 2>/dev/null) && [ -n \"$v\" ] && echo \"current_now: $v\" && break; done"))
             if self.gpu_paths:
                 parts.append(("gpu", "for f in %s; do echo \"$f|$(head -c 120 $f 2>/dev/null | tr '\\n' ' ')\"; done" % " ".join(self.gpu_paths)))
-        if tick % 4 == 0:
+        if not L and tick % 4 == 0:
             parts.append(("top", "top -b -n 1 -m 8 -o PID,USER,%CPU,%MEM,NAME -s 3"))
+        if not L and tick % 4 == 1 or L and tick % 16 == 2:
             parts.append(("mem", "grep -E 'MemTotal|MemAvailable' /proc/meminfo"))
-        if tick % 6 == 0:
+        if tick % (8 if L else 6) == 0:
             parts.append(("focus", "dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity'"))
             parts.append(("layers", "dumpsys SurfaceFlinger --list"))
         if tick % 20 == 0:
             parts.append(("refresh", "dumpsys SurfaceFlinger | grep -m1 -E 'refresh-rate'"))
 
         sec = sections(self.sh.run("\n".join("echo @@%s\n%s" % p for p in parts)))
-        msg = {"t": time.time(), "serial": self.serial, "device": self.device}
+        msg = {"t": time.time(), "serial": self.serial, "device": self.device, "light": self.light}
 
         if "focus" in sec:
             self.update_target(sec)
@@ -594,7 +598,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/mdns":
             return self.send_json(mdns_services())
         if u.path == "/api/stream":
-            return self.stream(parse_qs(u.query).get("serial", [""])[0])
+            qs = parse_qs(u.query)
+            return self.stream(qs.get("serial", [""])[0], qs.get("mode", [""])[0] == "light")
         self.send_error(404)
 
     def static(self, name, ctype):
@@ -607,10 +612,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def stream(self, serial):
+    def stream(self, serial, light=False):
         if not serial or not ADDR_RE.match(serial):
             return self.send_json({"error": "bad serial"}, 400)
         sampler = MANAGER.get(serial)
+        sampler.light = light
         q = sampler.subscribe()
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -669,6 +675,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/wifi":
             ok, out = switch_to_wifi(serial)
             return self.send_json({"ok": ok, "msg": out})
+        if path == "/api/mode":
+            smp = MANAGER.samplers.get(serial)
+            if smp:
+                smp.light = bool(body.get("light"))
+            return self.send_json({"ok": True, "light": bool(body.get("light"))})
         if path == "/api/reset":
             s = MANAGER.samplers.get(serial)
             if s:

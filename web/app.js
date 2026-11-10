@@ -51,6 +51,7 @@ class Chart {
 
 const fpsChart = new Chart($("fpsChart")), ftChart = new Chart($("ftChart")), tChart = new Chart($("tChart"), { legend: true });
 const FPS_N = 240, FT_N = 600, T_N = 300;
+let light = (() => { try { return localStorage.getItem("dfps-light") === "1"; } catch { return false; } })();
 let fpsHist = [], low1Hist = [], ftHist = [], tHist = {}, last = {}, es = null, serial = null, rec = null, hz = null;
 
 function push(arr, v, n) { arr.push(v); if (arr.length > n) arr.splice(0, arr.length - n); }
@@ -85,7 +86,7 @@ function start(s) {
   if (es) es.close();
   serial = s; resetCharts(); banner("");
   if (!s) return;
-  es = new EventSource("/api/stream?serial=" + encodeURIComponent(s));
+  es = new EventSource("/api/stream?serial=" + encodeURIComponent(s) + (light ? "&mode=light" : ""));
   es.onmessage = (e) => onData(JSON.parse(e.data));
   es.onerror = () => { $("dot").className = "dot err"; };
 }
@@ -129,6 +130,7 @@ function onData(d) {
   if (d.cpu) renderCpu(d);
   renderMisc();
   if (d.procs) renderProcs(d.procs);
+  else if (d.light && last.procs === undefined) $("procs").querySelector("tbody").innerHTML = "<tr><td colspan=3 class=sub>Off in light mode</td></tr>";
   if (d.device && !$("devInfo").textContent) {
     const v = d.device;
     $("devInfo").textContent = `${v.maker} ${v.model} (${v.codename}) · SoC ${v.soc || "?"} · Android ${v.android} · ${d.serial}`;
@@ -209,6 +211,14 @@ async function post(url, body) {
     return r;
   } catch (e) { $("connMsg").textContent = "✖ " + e; return {}; }
 }
+function paintLight() { $("lightBtn").textContent = "Light mode: " + (light ? "on" : "off"); $("lightBtn").classList.toggle("on", light); }
+$("lightBtn").onclick = () => {
+  light = !light; paintLight();
+  try { localStorage.setItem("dfps-light", light ? "1" : "0"); } catch {}
+  if (serial) post("/api/mode", { serial, light });
+  if (light) { delete last.procs; $("procs").querySelector("tbody").innerHTML = "<tr><td colspan=3 class=sub>Off in light mode</td></tr>"; }
+};
+paintLight();
 $("deviceSel").onchange = (e) => start(e.target.value);
 $("refreshBtn").onclick = () => loadDevices();
 $("connBtn").onclick = () => { $("connPanel").classList.toggle("hidden"); scanMdns(); };

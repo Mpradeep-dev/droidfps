@@ -17,6 +17,7 @@ select, input, button { background: var(--card); color: var(--text); border: 1px
 button { cursor: pointer; }
 button:hover { border-color: var(--accent); }
 button.on { background: var(--bad); border-color: var(--bad); }
+#lightBtn.on { background: #1f4d3a; border-color: var(--accent); }
 select { min-width: 220px; max-width: 100%; }
 .panel { margin: 12px 16px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
 .hidden { display: none !important; }

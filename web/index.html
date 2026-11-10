@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DroidFPS</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot" id="dot"></span>DroidFPS</div>
+  <div class="device-bar">
+    <select id="deviceSel" aria-label="Device"></select>
+    <button id="refreshBtn" title="Rescan devices">↻</button>
+    <button id="connBtn">Wi-Fi / connect</button>
+    <button id="resetBtn">Reset stats</button>
+    <button id="recBtn">● Record</button>
+  </div>
+</header>
+
+<section id="connPanel" class="panel hidden">
+  <div class="conn-grid">
+    <div>
+      <h3>USB → Wi-Fi</h3>
+      <p>Phone plugged in by USB and on the same Wi-Fi as this PC. Switches adb to Wi-Fi (port 5555) so you can unplug.</p>
+      <button id="wifiBtn">Switch selected USB device to Wi-Fi</button>
+    </div>
+    <div>
+      <h3>Connect by IP</h3>
+      <p>Phone already listening (after the step on the left, or Wireless debugging's IP &amp; port).</p>
+      <div class="row"><input id="connAddr" placeholder="192.168.1.20:5555"><button id="connectBtn">Connect</button></div>
+    </div>
+    <div>
+      <h3>Pair (Android 11+, no cable)</h3>
+      <p>Developer options → Wireless debugging → Pair device with pairing code. Then connect with the IP &amp; port shown on the Wireless debugging screen.</p>
+      <div class="row"><input id="pairAddr" placeholder="192.168.1.20:37123"><input id="pairCode" placeholder="123456" inputmode="numeric" class="short"><button id="pairBtn">Pair</button></div>
+    </div>
+  </div>
+  <pre id="connMsg"></pre>
+</section>
+
+<div id="banner" class="banner hidden"></div>
+
+<main>
+  <section class="hero">
+    <div class="big">
+      <div class="label">FPS</div>
+      <div class="fps" id="fps">--</div>
+      <div class="sub" id="app">no app</div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span>Avg</span><b id="avg">--</b></div>
+      <div class="kpi"><span>1% low</span><b id="low1">--</b></div>
+      <div class="kpi"><span>0.1% low</span><b id="low01">--</b></div>
+      <div class="kpi"><span>1% low (30 s)</span><b id="low1w">--</b></div>
+      <div class="kpi"><span>Frame time</span><b id="ft">--</b></div>
+      <div class="kpi"><span>Worst frame (30 s)</span><b id="jank">--</b></div>
+      <div class="kpi"><span>Stutters (30 s)</span><b id="stut">--</b></div>
+      <div class="kpi"><span>Display Hz</span><b id="hz">--</b></div>
+      <div class="kpi"><span>Frames</span><b id="frames">--</b></div>
+      <div class="kpi"><span>Session</span><b id="sess">--</b></div>
+    </div>
+  </section>
+
+  <section class="charts">
+    <div class="card"><h2>FPS <small>last 2 min</small></h2><canvas id="fpsChart"></canvas></div>
+    <div class="card"><h2>Frame time <small>ms, last 600 frames</small></h2><canvas id="ftChart"></canvas></div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Thermals <small id="tstatus"></small></h2>
+      <div id="temps" class="temps"></div>
+      <canvas id="tChart" class="short-chart"></canvas>
+    </div>
+    <div class="card">
+      <h2>CPU <small id="cpuTot"></small></h2>
+      <div id="cpus"></div>
+    </div>
+    <div class="card">
+      <h2>GPU · Battery · Memory</h2>
+      <div class="stats" id="misc"></div>
+    </div>
+    <div class="card">
+      <h2>Top processes</h2>
+      <table id="procs"><thead><tr><th>Process</th><th>CPU %</th><th>Mem %</th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+</main>
+<footer id="devInfo"></footer>
+<script src="/app.js"></script>
+</body>
+</html>
